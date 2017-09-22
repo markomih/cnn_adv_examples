@@ -1,0 +1,2 @@
+model_checkpoint_path: "C:\\Users\\Maki\\Documents\\cnn_adv_examples\\src\\tmp\\model.ckpt"
+all_model_checkpoint_paths: "C:\\Users\\Maki\\Documents\\cnn_adv_examples\\src\\tmp\\model.ckpt"
