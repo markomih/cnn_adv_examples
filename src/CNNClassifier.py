@@ -52,7 +52,8 @@ class CNNClassifier:
 
         adv_class_placeholder = tf.placeholder(dtype=tf.int32, name='adv_class_placeholder')
         # adv_loss = self.loss(logits, [adv_class_placeholder])  # maybe [adv..]
-        adv_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=[adv_class_placeholder], name='loss_adv')
+        adv_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=[adv_class_placeholder],
+                                                                  name='loss_adv')
         adv_gradient = tf.gradients(adv_loss, images_placeholder, name='adv_gradient')
 
         summary = tf.summary.merge_all()
@@ -122,8 +123,10 @@ class CNNClassifier:
                 # score_target = predictions[0][cls_target]
                 # print(score_source, score_target)
                 print('iteration %s' % i, np.argmax(predictions[0]), cls_source)
-                if np.argmax(predictions[0]) == cls_source:
-                    feed_dict = {images_placeholder: noisy_image.reshape(1, 784), adv_class_placeholder: cls_target, keep_prob: 1.0}
+                if np.argmax(predictions[0]) != cls_target:
+                    # if np.argmax(predictions[0]) == cls_source:
+                    feed_dict = {images_placeholder: noisy_image.reshape(1, 784), adv_class_placeholder: cls_target,
+                                 keep_prob: 1.0}
                     pred, grad = self.sess.run([logits, adv_gradient], feed_dict=feed_dict)
                     pred, grad = pred[0], grad[0]
 
@@ -134,7 +137,7 @@ class CNNClassifier:
                     # Normalised [-1,1]
                     # grad = 2 * (grad - np.max(grad)) / -np.ptp(grad) - 1
                     # noise -= 2 * grad
-                    noise -= 0.005 * np.sign(grad)
+                    noise -= 0.25 * np.sign(grad)
                     # noise -= step_size*grad
                     # noise = np.clip(noise, -noise_limit, noise_limit)
                     # print('iter: %d\t correct score:%f\t target score:%f' % (i, pred[cls_source], pred[cls_target]))
