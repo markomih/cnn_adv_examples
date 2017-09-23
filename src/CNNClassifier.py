@@ -4,6 +4,7 @@ import time
 import numpy as np
 import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
+import matplotlib.pyplot as plt
 
 
 class MNISTLoader:
@@ -105,9 +106,11 @@ class CNNClassifier:
 
 
         cls_target = 3
-        noise_limit = .3
-        step_size = .1
+        noise_limit = .2
+        step_size = (1.0/256.0)
         require_score = .95
+
+        mnist_labels = [i for i in range(10)]
 
         for img, cls_source in zip(self.dataset.data.test.images[:10], self.dataset.data.test.labels[:10]):
             img = img.reshape(1, 784)
@@ -138,17 +141,50 @@ class CNNClassifier:
                     # grad = 2 * (grad - np.max(grad)) / -np.ptp(grad) - 1
                     # noise -= 2 * grad
 
-                    noise -= 0.25 * np.sign(grad)
+                    noise -= step_size * np.sign(grad)
                     if False:
-                        noise -= 10**7*grad
-                    # noise = np.clip(noise, -noise_limit, noise_limit)
+                        noise -= step_size*grad   #10^7
+
+                    noise = np.clip(noise, -noise_limit, noise_limit)
                     # print('iter: %d\t correct score:%f\t target score:%f' % (i, pred[cls_source], pred[cls_target]))
                     # if pred[cls_target] < require_score:
                     #     noise = np.clip(noise - step_size * grad, -noise_limit, noise_limit)
                     # else:
                     #     break
                 else:
+                    p = predictions[0]
+                    topk = list(p.argsort()[-10:][::-1])
+                    topprobs = p[topk]
+
+                    correct_class = cls_source
+
+                    fig, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize=(10, 8))
+                    fig.sca(ax1)
+                    ax1.imshow(noisy_image.reshape(28, 28), cmap='gray')
+                    fig.sca(ax1)
+                    fig.sca(ax3)
+                    ax3.imshow(img.reshape(28, 28), cmap='gray')
+                    fig.sca(ax3)
+
+                    ax4.imshow((noise+0.5).reshape(28, 28), cmap='gray')
+
+                    barlist = ax2.bar(range(10), topprobs)
+                    if cls_target in topk:
+                        barlist[topk.index(cls_target)].set_color('r')
+                    if correct_class in topk:
+                        barlist[topk.index(correct_class)].set_color('g')
+                    plt.sca(ax2)
+                    plt.ylim([0, 1.1])
+                    plt.xticks(range(10),
+                               [mnist_labels[i] for i in topk],
+                               rotation='vertical')
+                    fig.subplots_adjust(bottom=0.2)
+                    plt.show()
+
+
+
                     break
+
 
         writer = tf.summary.FileWriter(self.log_dir)
         writer.add_graph(tf.get_default_graph())
