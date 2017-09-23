@@ -1,4 +1,7 @@
-import os, time
+import os
+import time
+
+import numpy as np
 import tensorflow as tf
 from tensorflow.examples.tutorials.mnist import input_data
 
@@ -14,7 +17,7 @@ class MNISTLoader:
 class CNNClassifier:
     sess = None
 
-    def __init__(self, learning_rate=0.01, max_steps=200, batch_size=100, log_dir='log', dropout_prob=0.5,
+    def __init__(self, learning_rate=0.01, max_steps=1000, batch_size=1, log_dir='log', dropout_prob=0.5,
                  restore_model_path=r'\tmp\model.ckpt', dataset=MNISTLoader()):
         """"
         Args: 
@@ -37,14 +40,7 @@ class CNNClassifier:
         self.dataset = dataset
 
     def restore_model(self):
-        with tf.Graph().as_default():
-            if os.path.exists(os.path.exists(self.restore_model_path + '.meta')):
-                saver = tf.train.Saver()
-                tf.reset_default_graph()
-                self.sess = tf.Session()
-                saver.restore(self.sess, self.restore_model_path)
-            else:
-                self.run_training()
+        self.run_training()
 
     def run_training(self):
         images_placeholder, labels_placeholder = self.placeholder_inputs()
@@ -61,35 +57,84 @@ class CNNClassifier:
         saver = tf.train.Saver()
         self.sess.run(init_op)
 
-        for step in range(self.max_steps):
-            start_time = time.time()
+        if os.path.exists(self.restore_model_path + '.meta'):
+            saver.restore(self.sess, self.restore_model_path)
+            # print('Test Data Eval:')
+            # self.do_eval(eval_correct, images_placeholder, labels_placeholder, self.dataset.data.test, keep_prob, 1.0)
+        else:
+            for step in range(self.max_steps):
+                start_time = time.time()
 
-            feed_dict = self.fill_feed_dict(self.dataset.data.train, images_placeholder, labels_placeholder, keep_prob,
-                                            self.dropout_prob)
-            activations, loss_value = self.sess.run([train_op, loss], feed_dict=feed_dict)
+                feed_dict = self.fill_feed_dict(self.dataset.data.train, images_placeholder, labels_placeholder,
+                                                keep_prob,
+                                                self.dropout_prob)
+                activations, loss_value = self.sess.run([train_op, loss], feed_dict=feed_dict)
 
-            duration = time.time() - start_time
+                duration = time.time() - start_time
 
-            if step % 100 == 0:  # log
-                print('Step %d: loss = %.2f (%.3f sec)' % (step, loss_value, duration))
-                # Update the events file.
-                summary_str = self.sess.run(summary, feed_dict=feed_dict)
-                summary_writer.add_summary(summary_str, step)
-                summary_writer.flush()
+                if step % 100 == 0:  # log
+                    print('Step %d: loss = %.2f (%.3f sec)' % (step, loss_value, duration))
+                    # Update the events file.
+                    summary_str = self.sess.run(summary, feed_dict=feed_dict)
+                    summary_writer.add_summary(summary_str, step)
+                    summary_writer.flush()
 
-            if (step + 1) % 1000 == 0 or (step + 1) == self.max_steps:  # save a checkpoint
-                print('Training Data Eval:')
-                self.do_eval(eval_correct, images_placeholder, labels_placeholder, self.dataset.data.train, keep_prob,
-                             self.dropout_prob)
-                print('Validation Data Eval:')
-                self.do_eval(eval_correct, images_placeholder, labels_placeholder, self.dataset.data.validation,
-                             keep_prob, 1.0)
-                print('Test Data Eval:')
-                self.do_eval(eval_correct, images_placeholder, labels_placeholder, self.dataset.data.test, keep_prob,
-                             1.0)
+                if (step + 1) % 1000 == 0 or (step + 1) == self.max_steps:  # save a checkpoint
+                    print('Training Data Eval:')
+                    self.do_eval(eval_correct, images_placeholder, labels_placeholder, self.dataset.data.train,
+                                 keep_prob,
+                                 self.dropout_prob)
+                    print('Validation Data Eval:')
+                    self.do_eval(eval_correct, images_placeholder, labels_placeholder, self.dataset.data.validation,
+                                 keep_prob, 1.0)
+                    print('Test Data Eval:')
+                    self.do_eval(eval_correct, images_placeholder, labels_placeholder, self.dataset.data.test,
+                                 keep_prob, 1.0)
+            save_path = saver.save(self.sess, self.restore_model_path)
+            print('Model saved in file: %s' % save_path)
 
-        save_path = saver.save(self.sess, self.restore_model_path)
-        print('Model saved in file: %s' % save_path)
+        if False:
+            adv_class_placeholder = tf.placeholder(dtype=tf.int32, name='adv_class_placeholder')
+            adv_loss = self.loss(logits, [adv_class_placeholder])  # maybe [adv..]
+            adv_gradient = tf.gradients(adv_loss, images_placeholder, name='adv_gradient')
+
+            noise = np.zeros((1, self.dataset.image_pixels))
+
+            img, cls_source = self.dataset.data.test.images[1], self.dataset.data.test.labels[1]  # lbl=7
+            cls_target = 3
+            noise_limit = .3
+            step_size = .1
+            require_score = .95
+
+        # feed_dict = {images_placeholder: img.reshape(1, 784), labels_placeholder: [1], keep_prob:1.0}
+        # pred = self.sess.run([logits], feed_dict=feed_dict)
+        # cls_source = np.argmax(pred[0])
+        # print(pred[0])
+
+        for img, cls_source in zip(self.dataset.data.test.images[1:10], self.dataset.data.test.labels[1:10]):  # lbl=7
+            predictions = self.sess.run(logits, feed_dict={images_placeholder: img.reshape(1, 784), keep_prob:1.0})
+            print(np.argmax(predictions[0]), cls_source)
+        # for i in range(1000):
+        #     noisy_image = np.clip(img + noise, 0.0, 1.0)
+        #
+        #     feed_dict = {images_placeholder: noisy_image, adv_class_placeholder: cls_target, keep_prob: 1.0}
+        #     pred, grad = self.sess.run([logits, adv_gradient], feed_dict=feed_dict)
+        #     pred, grad = pred[0], grad[0]
+        #     # pred = (pred - np.max(pred)) / -np.ptp(pred)
+        #
+        #     score_source = pred[cls_source]
+        #     score_target = pred[cls_target]
+        #
+        #     # activations, loss_value = self.sess.run([train_op, loss], feed_dict=feed_dict)
+        #     feed_dict = self.fill_feed_dict(self.dataset.data.train, images_placeholder, labels_placeholder,
+        #                                     keep_prob, 1)
+        #     activations, loss_value = self.sess.run([train_op, loss], feed_dict=feed_dict)
+        #
+        #     print('iter: %d\t correct score:%f\t target score:%f' % (i, pred[cls_source], pred[cls_target]))
+        #     if pred[cls_target] < require_score:
+        #         noise = np.clip(noise - step_size * grad, -noise_limit, noise_limit)
+        #     else:
+        #         break
 
     def placeholder_inputs(self):
         images_placeholder = tf.placeholder(tf.float32, shape=(self.batch_size, self.dataset.image_pixels))
@@ -153,7 +198,9 @@ class CNNClassifier:
             y_conv = tf.matmul(h_fc1_drop, W_fc2) + b_fc2
             # y_conv = tf.matmul(h_fc1, W_fc2) + b_fc2
 
-        return y_conv, keep_prob
+        with tf.name_scope('softmax'):
+            probs = tf.nn.softmax(y_conv)
+        return probs, keep_prob
 
     @staticmethod
     def loss(logits, labels):
