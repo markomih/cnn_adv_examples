@@ -137,8 +137,10 @@ class CNNClassifier:
                     # Normalised [-1,1]
                     # grad = 2 * (grad - np.max(grad)) / -np.ptp(grad) - 1
                     # noise -= 2 * grad
+
                     noise -= 0.25 * np.sign(grad)
-                    # noise -= step_size*grad
+                    if False:
+                        noise -= 10**7*grad
                     # noise = np.clip(noise, -noise_limit, noise_limit)
                     # print('iter: %d\t correct score:%f\t target score:%f' % (i, pred[cls_source], pred[cls_target]))
                     # if pred[cls_target] < require_score:
