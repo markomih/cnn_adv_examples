@@ -39,23 +39,20 @@ class CNNClassifier:
         self.restore_model_path = os.getcwd() + restore_model_path
 
         self.dataset = dataset
+        self.graph = self.ComputationalGraph()
 
-    def restore_model(self):
-        self.run_training()
-
-    def run_training(self):
+    def restore_model(self, print_accuracy=False):
         # region init layers and session
-        images_placeholder, labels_placeholder = self.placeholder_inputs()
-        logits, keep_prob = self.inference(images_placeholder)
-        loss = self.loss(logits, labels_placeholder)
-        train_op = self.training(loss, self.learning_rate)
-        eval_correct = self.evaluation(logits, labels_placeholder)
+        self.graph.images_placeholder, self.graph.labels_placeholder = self.placeholder_inputs()
+        self.inference(self.graph.images_placeholder)
+        self.graph.loss = self.loss(self.graph.probs, self.graph.labels_placeholder)
+        train_op = self.training(self.graph.loss, self.learning_rate)
+        eval_correct = self.evaluation(self.graph.probs, self.graph.labels_placeholder)
 
-        adv_class_placeholder = tf.placeholder(dtype=tf.int32, name='adv_class_placeholder')
-        # adv_loss = self.loss(logits, [adv_class_placeholder])  # maybe [adv..]
-        adv_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=[adv_class_placeholder],
-                                                                  name='loss_adv')
-        adv_gradient = tf.gradients(adv_loss, images_placeholder, name='adv_gradient')
+        self.graph.adv_class_placeholder = tf.placeholder(dtype=tf.int32, name='adv_class_placeholder')
+        # adv_loss = self.loss(logits, [self.graph.adv_class_placeholder])  # maybe [adv..]
+        self.graph.adv_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.graph.probs, labels=[self.graph.adv_class_placeholder], name='loss_adv')
+        self.graph.adv_gradient = tf.gradients(self.graph.adv_loss, self.graph.images_placeholder, name='adv_gradient')
 
         summary = tf.summary.merge_all()
         self.sess = tf.Session()
@@ -69,49 +66,39 @@ class CNNClassifier:
         # region restore model
         if os.path.exists(self.restore_model_path + '.meta'):
             saver.restore(self.sess, self.restore_model_path)
-            # print('Test Data Eval:')
-            # self.do_eval(eval_correct, images_placeholder, labels_placeholder, self.dataset.data.test, keep_prob, 1.0)
-        else:
-            for step in range(self.max_steps):
-                start_time = time.time()
+            if print_accuracy:
+                print('Test Data Eval:')
+                self.do_eval(eval_correct, self.dataset.data.test, 1.0)
+            return
 
-                feed_dict = self.fill_feed_dict(self.dataset.data.train, images_placeholder, labels_placeholder,
-                                                keep_prob,
-                                                self.dropout_prob)
-                activations, loss_value = self.sess.run([train_op, loss], feed_dict=feed_dict)
+        for step in range(self.max_steps):
+            start_time = time.time()
 
-                duration = time.time() - start_time
+            feed_dict = self.fill_feed_dict(self.dataset.data.train, self.graph.images_placeholder, self.graph.labels_placeholder,
+                                            self.graph.keep_prob, self.dropout_prob)
+            activations, loss_value = self.sess.run([train_op, self.graph.loss], feed_dict=feed_dict)
 
-                if step % 100 == 0:  # log
-                    print('Step %d: loss = %.2f (%.3f sec)' % (step, loss_value, duration))
-                    # Update the events file.
-                    summary_str = self.sess.run(summary, feed_dict=feed_dict)
-                    summary_writer.add_summary(summary_str, step)
-                    summary_writer.flush()
+            duration = time.time() - start_time
 
-                if (step + 1) % 1000 == 0 or (step + 1) == self.max_steps:  # save a checkpoint
-                    print('Training Data Eval:')
-                    self.do_eval(eval_correct, images_placeholder, labels_placeholder, self.dataset.data.train,
-                                 keep_prob,
-                                 self.dropout_prob)
-                    print('Validation Data Eval:')
-                    self.do_eval(eval_correct, images_placeholder, labels_placeholder, self.dataset.data.validation,
-                                 keep_prob, 1.0)
-                    print('Test Data Eval:')
-                    self.do_eval(eval_correct, images_placeholder, labels_placeholder, self.dataset.data.test,
-                                 keep_prob, 1.0)
-            save_path = saver.save(self.sess, self.restore_model_path)
-            print('Model saved in file: %s' % save_path)
+            if step % 100 == 0:  # plot loss function
+                print('Step %d: loss = %.2f (%.3f sec)' % (step, loss_value, duration))
+                # Update the events file.
+                summary_str = self.sess.run(summary, feed_dict=feed_dict)
+                summary_writer.add_summary(summary_str, step)
+                summary_writer.flush()
+
+            if (step + 1) % 1000 == 0 or (step + 1) == self.max_steps and print_accuracy:
+                print('Training Data Eval:')
+                self.do_eval(eval_correct, self.dataset.data.train, self.dropout_prob)
+                print('Validation Data Eval:')
+                self.do_eval(eval_correct,  self.dataset.data.validation, 1.0)
+                print('Test Data Eval:')
+                self.do_eval(eval_correct, self.dataset.data.test, 1.0)
+        save_path = saver.save(self.sess, self.restore_model_path)
+        print('Model saved in file: %s' % save_path)
         # endregion
 
-
-        cls_target = 3
-        noise_limit = .2
-        step_size = (1.0/256.0)
-        require_score = .95
-
-        mnist_labels = [i for i in range(10)]
-
+    def generate_adversarial_examples(self, cls_target=3, noise_limit=2, step_size=(1.0/255.0), required_score=0.95):
         for img, cls_source in zip(self.dataset.data.test.images[:10], self.dataset.data.test.labels[:10]):
             img = img.reshape(1, 784)
             noise = np.zeros((1, 784))
@@ -120,74 +107,50 @@ class CNNClassifier:
                 noisy_image = img + noise
                 noisy_image = np.clip(noisy_image, 0.0, 1.0)
 
-                predictions = self.sess.run(logits,
-                                            feed_dict={images_placeholder: noisy_image.reshape(1, 784), keep_prob: 1.0})
-                # score_source = predictions[0][cls_source]
-                # score_target = predictions[0][cls_target]
-                # print(score_source, score_target)
-                print('iteration %s' % i, np.argmax(predictions[0]), cls_source)
-                if np.argmax(predictions[0]) != cls_target:
-                    # if np.argmax(predictions[0]) == cls_source:
-                    feed_dict = {images_placeholder: noisy_image.reshape(1, 784), adv_class_placeholder: cls_target,
-                                 keep_prob: 1.0}
-                    pred, grad = self.sess.run([logits, adv_gradient], feed_dict=feed_dict)
+                predictions = self.sess.run(self.graph.probs, feed_dict={self.graph.images_placeholder: noisy_image.reshape(1, 784), self.graph.keep_prob: 1.0}).reshape(-1)
+                print('iteration %s' % i, np.argmax(predictions), cls_source)
+                if np.argmax(predictions) != cls_target:  # if np.argmax(predictions[0]) == cls_source:
+                    feed_dict = {self.graph.images_placeholder: noisy_image.reshape(1, 784), self.graph.adv_class_placeholder: cls_target, self.graph.keep_prob: 1.0}
+                    pred, grad = self.sess.run([self.graph.probs, self.graph.adv_gradient], feed_dict=feed_dict)
                     pred, grad = pred[0], grad[0]
-
-                    # score_source = pred[cls_source]
-                    # score_target = pred[cls_target]
-                    # print('pred', score_source, score_target)
-
-                    # Normalised [-1,1]
-                    # grad = 2 * (grad - np.max(grad)) / -np.ptp(grad) - 1
-                    # noise -= 2 * grad
 
                     noise -= step_size * np.sign(grad)
                     if False:
-                        noise -= step_size*grad   #10^7
+                        noise -= step_size * grad  # 10^7
 
                     noise = np.clip(noise, -noise_limit, noise_limit)
-                    # print('iter: %d\t correct score:%f\t target score:%f' % (i, pred[cls_source], pred[cls_target]))
-                    # if pred[cls_target] < require_score:
-                    #     noise = np.clip(noise - step_size * grad, -noise_limit, noise_limit)
-                    # else:
-                    #     break
                 else:
-                    p = predictions[0]
-                    topk = list(p.argsort()[-10:][::-1])
-                    topprobs = p[topk]
-
-                    correct_class = cls_source
-
-                    fig, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize=(10, 8))
-                    fig.sca(ax1)
-                    ax1.imshow(noisy_image.reshape(28, 28), cmap='gray')
-                    fig.sca(ax1)
-                    fig.sca(ax3)
-                    ax3.imshow(img.reshape(28, 28), cmap='gray')
-                    fig.sca(ax3)
-
-                    ax4.imshow((noise+0.5).reshape(28, 28), cmap='gray')
-
-                    barlist = ax2.bar(range(10), topprobs)
-                    if cls_target in topk:
-                        barlist[topk.index(cls_target)].set_color('r')
-                    if correct_class in topk:
-                        barlist[topk.index(correct_class)].set_color('g')
-                    plt.sca(ax2)
-                    plt.ylim([0, 1.1])
-                    plt.xticks(range(10),
-                               [mnist_labels[i] for i in topk],
-                               rotation='vertical')
-                    fig.subplots_adjust(bottom=0.2)
-                    plt.show()
-
-
-
+                    self.plot(img, noise, noisy_image, cls_source, cls_target, predictions)
                     break
-
 
         writer = tf.summary.FileWriter(self.log_dir)
         writer.add_graph(tf.get_default_graph())
+
+    def plot(self, img, noise, noisy_image, cls_source, cls_target, predictions):
+        mnist_labels = [i for i in range(self.dataset.num_classes)]
+        topk = list(predictions.argsort()[::-1])
+        topprobs = predictions[predictions.argsort()[::-1]]
+
+        fig, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize=(10, 8))
+        fig.sca(ax1)
+        ax1.imshow(noisy_image.reshape(28, 28), cmap='gray')
+        fig.sca(ax1)
+        fig.sca(ax3)
+        ax3.imshow(img.reshape(28, 28), cmap='gray')
+        fig.sca(ax3)
+
+        ax4.imshow((noise + 0.5).reshape(self.dataset.image_size, self.dataset.image_size), cmap='gray')
+
+        barlist = ax2.bar(range(10), topprobs)
+        if cls_target in topk:
+            barlist[topk.index(cls_target)].set_color('r')
+        if cls_source in topk:
+            barlist[topk.index(cls_source)].set_color('g')
+        plt.sca(ax2)
+        plt.ylim([0, 1.1])
+        plt.xticks(range(10), [mnist_labels[i] for i in topk], rotation='vertical')
+        fig.subplots_adjust(bottom=0.2)
+        plt.show()
 
     def placeholder_inputs(self):
         images_placeholder = tf.placeholder(tf.float32, shape=(self.batch_size, self.dataset.image_pixels))
@@ -204,13 +167,13 @@ class CNNClassifier:
             keep_prob: dropout_prob
         }
 
-    def do_eval(self, eval_correct, images_placeholder, labels_placeholder, data_set, keep_prob, dropout_prob):
+    def do_eval(self, eval_correct, data_set, dropout_prob):
         true_count = 0
         steps_per_epoch = data_set.num_examples // self.batch_size
         num_examples = steps_per_epoch * self.batch_size
 
         for step in range(steps_per_epoch):
-            feed_dict = self.fill_feed_dict(data_set, images_placeholder, labels_placeholder, keep_prob, dropout_prob)
+            feed_dict = self.fill_feed_dict(data_set, self.graph.images_placeholder, self.graph.labels_placeholder, self.graph.keep_prob, dropout_prob)
             true_count += self.sess.run(eval_correct, feed_dict=feed_dict)
         precision = float(true_count) / num_examples
         print('Num examples: %d  Num correct: %d  Precision @ 1: %0.04f' % (num_examples, true_count, precision))
@@ -253,9 +216,9 @@ class CNNClassifier:
 
         with tf.name_scope('softmax'):
             probs = tf.nn.softmax(y_conv)
-        return probs, keep_prob
 
-    # region helpers
+        self.graph.probs = probs
+        self.graph.keep_prob = keep_prob
 
     @staticmethod
     def loss(logits, labels):
@@ -295,4 +258,13 @@ class CNNClassifier:
     def bias_variable(shape):
         return tf.Variable(tf.constant(value=.1, dtype=tf.float32, shape=shape))
 
-        # endregion
+    class ComputationalGraph:
+        def __init__(self):
+            self.images_placeholder, self.labels_placeholder = None, None
+            self.keep_prob = None
+            self.probs = None
+            self.loss = None
+
+            self.adv_class_placeholder = None
+            self.adv_gradient = None
+            self.adv_loss = None
