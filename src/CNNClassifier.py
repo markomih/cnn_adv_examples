@@ -100,17 +100,17 @@ class CNNClassifier:
 
     def generate_adversarial_examples(self, cls_target=3, noise_limit=2, step_size=(1.0/255.0), required_score=0.95):
         for img, cls_source in zip(self.dataset.data.test.images[:10], self.dataset.data.test.labels[:10]):
-            img = img.reshape(1, 784)
-            noise = np.zeros((1, 784))
+            img = img.reshape(1, self.dataset.image_pixels)
+            noise = np.zeros((1, self.dataset.image_pixels))
 
             for i in range(1000):
                 noisy_image = img + noise
                 noisy_image = np.clip(noisy_image, 0.0, 1.0)
 
-                predictions = self.sess.run(self.graph.probs, feed_dict={self.graph.images_placeholder: noisy_image.reshape(1, 784), self.graph.keep_prob: 1.0}).reshape(-1)
+                predictions = self.sess.run(self.graph.probs, feed_dict={self.graph.images_placeholder: noisy_image.reshape(1, self.dataset.image_pixels), self.graph.keep_prob: 1.0}).reshape(-1)
                 print('iteration %s' % i, np.argmax(predictions), cls_source)
                 if np.argmax(predictions) != cls_target:  # if np.argmax(predictions[0]) == cls_source:
-                    feed_dict = {self.graph.images_placeholder: noisy_image.reshape(1, 784), self.graph.adv_class_placeholder: cls_target, self.graph.keep_prob: 1.0}
+                    feed_dict = {self.graph.images_placeholder: noisy_image.reshape(1, self.dataset.image_pixels), self.graph.adv_class_placeholder: cls_target, self.graph.keep_prob: 1.0}
                     pred, grad = self.sess.run([self.graph.probs, self.graph.adv_gradient], feed_dict=feed_dict)
                     pred, grad = pred[0], grad[0]
 
@@ -133,10 +133,10 @@ class CNNClassifier:
 
         fig, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize=(10, 8))
         fig.sca(ax1)
-        ax1.imshow(noisy_image.reshape(28, 28), cmap='gray')
+        ax1.imshow(noisy_image.reshape(self.dataset.image_size, self.dataset.image_size), cmap='gray')
         fig.sca(ax1)
         fig.sca(ax3)
-        ax3.imshow(img.reshape(28, 28), cmap='gray')
+        ax3.imshow(img.reshape(self.dataset.image_size, self.dataset.image_size), cmap='gray')
         fig.sca(ax3)
 
         ax4.imshow((noise + 0.5).reshape(self.dataset.image_size, self.dataset.image_size), cmap='gray')
