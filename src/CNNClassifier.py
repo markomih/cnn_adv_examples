@@ -130,8 +130,6 @@ class CNNClassifier:
                         else:
                             noise -= 2 * step_size * grad / max(np.abs(grad.max()), np.abs(grad.min()))
 
-                        # if False:  noise -= step_size * grad  # 10^7
-
                         noise = np.clip(noise, -noise_limit, noise_limit)
                     else:
                         # self.plot(img, noise, noisy_image, cls_source, cls_target, predictions)
@@ -161,12 +159,9 @@ class CNNClassifier:
 
                 if np.argmax(predictions) != cls_target if source_target else np.argmax(predictions) == cls_source:
 
-                    if source_target:
-                        feed_dict = {self.graph.images_placeholder: noisy_image.reshape(1, self.dataset.image_pixels),
-                                     self.graph.adv_class_placeholder: cls_target, self.graph.keep_prob: 1.0}
-                    else:
-                        feed_dict = {self.graph.images_placeholder: noisy_image.reshape(1, self.dataset.image_pixels),
-                                     self.graph.adv_class_placeholder: cls_source, self.graph.keep_prob: 1.0}
+                    feed_dict = {self.graph.images_placeholder: noisy_image.reshape(1, self.dataset.image_pixels),
+                                 self.graph.adv_class_placeholder: cls_target if source_target else cls_source,
+                                 self.graph.keep_prob: 1.0}
 
                     pred, grad = self.sess.run([self.graph.probs, self.graph.adv_gradient], feed_dict=feed_dict)
                     pred, grad = pred[0], grad[0]
@@ -181,8 +176,6 @@ class CNNClassifier:
                             noise -= 2 * step_size * grad / max(np.abs(grad.max()), np.abs(grad.min()))
                         else:
                             noise += 2 * step_size * grad / max(np.abs(grad.max()), np.abs(grad.min()))
-
-                    # if False:  noise -= step_size * grad  # 10^7
 
                     noise = np.clip(noise, -noise_limit, noise_limit)
                 else:
