@@ -18,8 +18,8 @@ class MNISTLoader:
 class CNNClassifier:
     sess = None
 
-    def __init__(self, learning_rate=0.01, max_steps=1000, batch_size=1, log_dir='log', dropout_prob=0.5,
-                 restore_model_path=r'\tmp\model.ckpt', dataset=MNISTLoader()):
+    def __init__(self, learning_rate=0.01, max_steps=20000, batch_size=1, log_dir='log', dropout_prob=0.5,
+                 restore_model_path=r'\tmp_full\model.ckpt', dataset=MNISTLoader()):
         """"
         Args: 
             learning_rate: Initial learning rate.
@@ -45,7 +45,7 @@ class CNNClassifier:
         # region init layers and session
         self.graph.images_placeholder, self.graph.labels_placeholder = self.placeholder_inputs()
         self.inference(self.graph.images_placeholder)
-        self.graph.loss = self.loss(self.graph.probs, self.graph.labels_placeholder)
+        self.graph.loss = self.loss(self.graph.y_conv, self.graph.labels_placeholder)
         train_op = self.training(self.graph.loss, self.learning_rate)
         eval_correct = self.evaluation(self.graph.probs, self.graph.labels_placeholder)
 
@@ -90,7 +90,7 @@ class CNNClassifier:
                 summary_writer.add_summary(summary_str, step)
                 summary_writer.flush()
 
-            if (step + 1) % 1000 == 0 or (step + 1) == self.max_steps and print_accuracy:
+            if (step + 1) % 10000 == 0 or (step + 1) == self.max_steps and print_accuracy:
                 print('Training Data Eval:')
                 self.do_eval(eval_correct, self.dataset.data.train, self.dropout_prob)
                 print('Validation Data Eval:')
@@ -100,9 +100,8 @@ class CNNClassifier:
         save_path = saver.save(self.sess, self.restore_model_path)
         print('Model saved in file: %s' % save_path)
         # endregion
+        self.batch_size = 1
 
-    # TODO one more function
-    # TODO bool variable for two types; source-target and
     @staticmethod
     def update_noise(noise, noise_limit, step_size, grad, fast_sign, source_target):
         if fast_sign:
@@ -125,18 +124,17 @@ class CNNClassifier:
         for epoch in range(epochs):
             for img, cls_source in zip(self.dataset.data.validation.images, self.dataset.data.validation.labels):
                 if source_target and cls_source == cls_target: continue
-
                 img = img.reshape(1, self.dataset.image_pixels)
 
                 noisy_image = np.clip(img + noise, 0.0, 1.0)
 
                 predictions = self.sess.run(self.graph.probs, feed_dict={
-                    self.graph.images_placeholder: noisy_image.reshape(1, self.dataset.image_pixels),
+                    self.graph.images_placeholder: noisy_image,
                     self.graph.keep_prob: 1.0}).reshape(-1)
-
-                # if predictions[cls_target] > .9 if source_target else predictions[cls_source] > .4:
+                cls_source = np.argmax(predictions)
+                # if predictions[cls_target] > .7 if source_target else predictions[cls_source] > .4:
                 if np.argmax(predictions) != cls_target if source_target else np.argmax(predictions) == cls_source:
-                    feed_dict = {self.graph.images_placeholder: noisy_image.reshape(1, self.dataset.image_pixels),
+                    feed_dict = {self.graph.images_placeholder: noisy_image,
                                  self.graph.adv_class_placeholder: cls_target if source_target else cls_source,
                                  self.graph.keep_prob: 1.0}
 
@@ -306,6 +304,7 @@ class CNNClassifier:
         with tf.name_scope('softmax'):
             probs = tf.nn.softmax(y_conv)
 
+        self.graph.y_conv = y_conv
         self.graph.probs = probs
         self.graph.keep_prob = keep_prob
 
@@ -350,8 +349,8 @@ class CNNClassifier:
     class ComputationalGraph:
         def __init__(self):
             self.images_placeholder, self.labels_placeholder = None, None
+            self.y_conv, self.probs = None, None
             self.keep_prob = None
-            self.probs = None
             self.loss = None
 
             self.adv_class_placeholder = None
