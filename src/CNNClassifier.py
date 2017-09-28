@@ -103,17 +103,37 @@ class CNNClassifier:
 
     # TODO one more function
     # TODO bool variable for two types; source-target and
-    def generate_adversarial_examples_every_image(self, cls_target=3, noise_limit=2, step_size=(1.0 / 255.0),
-                                                  max_iterations=200, source_target=False, fast_sign=False, epochs=10):
-        accuracy = 0
+    @staticmethod
+    def update_noise(noise, noise_limit, step_size, grad, fast_sign, source_target):
+        if fast_sign:
+            if source_target:
+                noise -= step_size * np.sign(grad)
+            else:
+                noise += step_size * np.sign(grad)
+        else:
+            if source_target:
+                noise -= 2 * step_size * grad / max(np.abs(grad.max()), np.abs(grad.min()))
+            else:
+                noise += 2 * step_size * grad / max(np.abs(grad.max()), np.abs(grad.min()))
+
+        noise = np.clip(noise, -noise_limit, noise_limit)
+        return noise
+
+    def generate_general_adversarial_examples(self, cls_target=3, noise_limit=2, step_size=(1.0 / 255.0),
+                                              max_iterations=200, source_target=False, fast_sign=False, epochs=10):
+        adv_accuracy, same_classes, MSE = 0, 0, []
+        N = 100
         for epoch in range(epochs):
-            for img, cls_source in zip(self.dataset.data.test.images, self.dataset.data.test.labels):
+            for img, cls_source in zip(self.dataset.data.test.images[:100], self.dataset.data.test.labels[:100]):
+                if cls_source == cls_target:
+                    same_classes += 1
+                    continue
+
                 img = img.reshape(1, self.dataset.image_pixels)
-                noise = np.zeros((1, self.dataset.image_pixels))
+                noise = np.zeros(img.shape)
 
                 for i in range(max_iterations):
-                    noisy_image = img + noise
-                    noisy_image = np.clip(noisy_image, 0.0, 1.0)
+                    noisy_image = np.clip(img + noise, 0.0, 1.0)
 
                     predictions = self.sess.run(self.graph.probs, feed_dict={
                         self.graph.images_placeholder: noisy_image.reshape(1, self.dataset.image_pixels),
@@ -121,20 +141,21 @@ class CNNClassifier:
 
                     if np.argmax(predictions) != cls_target if source_target else np.argmax(predictions) == cls_source:
                         feed_dict = {self.graph.images_placeholder: noisy_image.reshape(1, self.dataset.image_pixels),
-                                     self.graph.adv_class_placeholder: cls_target, self.graph.keep_prob: 1.0}
+                                     self.graph.adv_class_placeholder: cls_target if source_target else cls_source,
+                                     self.graph.keep_prob: 1.0}
+
                         pred, grad = self.sess.run([self.graph.probs, self.graph.adv_gradient], feed_dict=feed_dict)
                         pred, grad = pred[0], grad[0]
 
-                        if fast_sign:
-                            noise -= step_size * np.sign(grad)
-                        else:
-                            noise -= 2 * step_size * grad / max(np.abs(grad.max()), np.abs(grad.min()))
-
-                        noise = np.clip(noise, -noise_limit, noise_limit)
+                        self.update_noise(noise, noise_limit, step_size, grad, fast_sign, source_target)
                     else:
                         # self.plot(img, noise, noisy_image, cls_source, cls_target, predictions)
-                        accuracy += 1
+                        adv_accuracy += 1
+                        MSE.append(noise ** 2)
                         break
+        RMSE = np.sqrt(np.sum(MSE) / (len(MSE) - 1))
+        print("RMSE=", RMSE, "\tadv_accuracy=", adv_accuracy / (N - same_classes), '\t\t\t\tstep size=', step_size,
+              "\tsource-target=%s\t" % source_target, '\tfast_sign=%s' % fast_sign)
 
     def generate_adversarial_examples(self, cls_target=3, noise_limit=.2, step_size=(1.0 / 255.0), max_iterations=200,
                                       source_target=False, fast_sign=False):
@@ -146,11 +167,10 @@ class CNNClassifier:
                 continue
 
             img = img.reshape(1, self.dataset.image_pixels)
-            noise = np.zeros((1, self.dataset.image_pixels))
+            noise = np.zeros(img.shape)
 
             for i in range(max_iterations):
-                noisy_image = img + noise
-                noisy_image = np.clip(noisy_image, 0.0, 1.0)
+                noisy_image = np.clip(img + noise, 0.0, 1.0)
 
                 predictions = self.sess.run(self.graph.probs, feed_dict={
                     self.graph.images_placeholder: noisy_image.reshape(1, self.dataset.image_pixels),
@@ -158,7 +178,6 @@ class CNNClassifier:
                 # print('iteration %s' % i, np.argmax(predictions), cls_source)
 
                 if np.argmax(predictions) != cls_target if source_target else np.argmax(predictions) == cls_source:
-
                     feed_dict = {self.graph.images_placeholder: noisy_image.reshape(1, self.dataset.image_pixels),
                                  self.graph.adv_class_placeholder: cls_target if source_target else cls_source,
                                  self.graph.keep_prob: 1.0}
@@ -166,25 +185,14 @@ class CNNClassifier:
                     pred, grad = self.sess.run([self.graph.probs, self.graph.adv_gradient], feed_dict=feed_dict)
                     pred, grad = pred[0], grad[0]
 
-                    if fast_sign:
-                        if source_target:
-                            noise -= step_size * np.sign(grad)
-                        else:
-                            noise += step_size * np.sign(grad)
-                    else:
-                        if source_target:
-                            noise -= 2 * step_size * grad / max(np.abs(grad.max()), np.abs(grad.min()))
-                        else:
-                            noise += 2 * step_size * grad / max(np.abs(grad.max()), np.abs(grad.min()))
-
-                    noise = np.clip(noise, -noise_limit, noise_limit)
+                    self.update_noise(noise, noise_limit, step_size, grad, fast_sign, source_target)
                 else:
                     # self.plot(img, noise, noisy_image, cls_source, cls_target, predictions)
                     adv_accuracy += 1
                     MSE.append(noise ** 2)
                     break
-        m = np.sqrt(np.sum(MSE) / (len(MSE) - 1))
-        print("RMSE=", m, "\tadv_accuracy=", adv_accuracy / (N - same_classes), '\t\t\t\tstep size=', step_size,
+        RMSE = np.sqrt(np.sum(MSE) / (len(MSE) - 1))
+        print("RMSE=", RMSE, "\tadv_accuracy=", adv_accuracy / (N - same_classes), '\t\t\t\tstep size=', step_size,
               "\tsource-target=%s\t" % source_target, '\tfast_sign=%s' % fast_sign)
 
         writer = tf.summary.FileWriter(self.log_dir)
