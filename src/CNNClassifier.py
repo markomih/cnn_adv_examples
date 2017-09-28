@@ -19,7 +19,7 @@ class CNNClassifier:
     sess = None
 
     def __init__(self, learning_rate=0.01, max_steps=20000, batch_size=1, log_dir='log', dropout_prob=0.5,
-                 restore_model_path=r'\tmp_full\model.ckpt', dataset=MNISTLoader()):
+                 restore_model_path=r'\tmp_final\model.ckpt', dataset=MNISTLoader()):
         """"
         Args: 
             learning_rate: Initial learning rate.
@@ -118,10 +118,72 @@ class CNNClassifier:
         noise = np.clip(noise, -noise_limit, noise_limit)
         return noise
 
-    def generate_general_adversarial_examples(self, cls_target=3, noise_limit=.3, step_size=(350.0 / 255.0), source_target=False,
-                                              fast_sign=False, epochs=100):
+    def generate_class_adversarial_examples(self, src_target=5, cls_target=3, noise_limit=.3, step_size=(350.0 / 255.0), source_target=False,
+                                              fast_sign=False, epochs=10):
         noise = np.zeros((1, self.dataset.image_pixels))
         for epoch in range(epochs):
+            print('epoch %s' % epoch)
+            # num_imgs = 100
+            for img, cls_source in zip(self.dataset.data.validation.images, self.dataset.data.validation.labels):
+                # if source_target and cls_source == cls_target: continue
+                if cls_source != src_target: continue
+
+                img = img.reshape(1, self.dataset.image_pixels)
+
+                noisy_image = np.clip(img + noise, 0.0, 1.0)
+
+                predictions = self.sess.run(self.graph.probs, feed_dict={
+                    self.graph.images_placeholder: noisy_image,
+                    self.graph.keep_prob: 1.0}).reshape(-1)
+                cls_source = np.argmax(predictions)
+                # if predictions[cls_target] > .7 if source_target else predictions[cls_source] > .4:
+                if np.argmax(predictions) != cls_target if source_target else np.argmax(predictions) == cls_source:
+                    feed_dict = {self.graph.images_placeholder: noisy_image,
+                                 self.graph.adv_class_placeholder: cls_target if source_target else cls_source,
+                                 self.graph.keep_prob: 1.0}
+
+                    pred, grad = self.sess.run([self.graph.probs, self.graph.adv_gradient], feed_dict=feed_dict)
+                    pred, grad = pred[0], grad[0]
+
+                    noise = self.update_noise(noise, noise_limit, step_size, grad, fast_sign, source_target)
+                else:
+                    # self.plot(img, noise, noisy_image, cls_source, cls_target, predictions)
+                    break
+
+        N = 100
+        skip_data, MSE = 0, []
+        adv_accuracy = 0
+        for img, cls_source in zip(self.dataset.data.test.images[:N], self.dataset.data.test.labels[:N]):
+            # if source_target and cls_source == cls_target:
+            #     same_classes += 1
+            #     continue
+
+            if cls_source != src_target:
+                skip_data += 1
+                continue
+
+            img = img.reshape(1, self.dataset.image_pixels)
+            noisy_image = np.clip(img + noise, 0, 1)
+
+            feed_dict = {
+                self.graph.images_placeholder: noisy_image,
+                self.graph.keep_prob: 1.0
+            }
+            predictions = self.sess.run(self.graph.probs, feed_dict=feed_dict)
+            cls_predicted = np.argmax(predictions)
+
+            if cls_predicted == cls_target if source_target else cls_predicted != cls_source:
+                adv_accuracy += 1
+
+        print('adv_accuracy = ', adv_accuracy / (N - skip_data), '\tRMS = ',
+              np.sqrt(np.sum(noise ** 2) / self.dataset.image_pixels))
+
+    def generate_general_adversarial_examples(self, cls_target=3, noise_limit=.3, step_size=(350.0 / 255.0), source_target=False,
+                                              fast_sign=False, epochs=10):
+        noise = np.zeros((1, self.dataset.image_pixels))
+        for epoch in range(epochs):
+            print('epoch %s' % epoch)
+            # num_imgs = 100
             for img, cls_source in zip(self.dataset.data.validation.images, self.dataset.data.validation.labels):
                 if source_target and cls_source == cls_target: continue
                 img = img.reshape(1, self.dataset.image_pixels)
@@ -146,10 +208,10 @@ class CNNClassifier:
                     # self.plot(img, noise, noisy_image, cls_source, cls_target, predictions)
                     break
 
-        N = 100
+        N = 1000
         same_classes, MSE = 0, []
         adv_accuracy = 0
-        for img, cls_source in zip(self.dataset.data.validation.images[:N], self.dataset.data.validation.labels[:N]):
+        for img, cls_source in zip(self.dataset.data.test.images[:N], self.dataset.data.test.labels[:N]):
             if source_target and cls_source == cls_target:
                 same_classes += 1
                 continue
@@ -173,7 +235,7 @@ class CNNClassifier:
     def generate_adversarial_examples(self, cls_target=3, noise_limit=.2, step_size=(1.0 / 255.0), max_iterations=200,
                                       source_target=False, fast_sign=False):
         adv_accuracy, same_classes, RMS = 0, 0, []
-        N = 100
+        N = 1000
         for img, cls_source in zip(self.dataset.data.test.images[:N], self.dataset.data.test.labels[:N]):
             if source_target and cls_source == cls_target:
                 same_classes += 1
