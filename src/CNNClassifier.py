@@ -124,7 +124,7 @@ class CNNClassifier:
         adv_accuracy, same_classes, MSE = 0, 0, []
         N = 100
         for epoch in range(epochs):
-            for img, cls_source in zip(self.dataset.data.test.images[:100], self.dataset.data.test.labels[:100]):
+            for img, cls_source in zip(self.dataset.data.validation.images[:100], self.dataset.data.validation.labels[:100]):
                 if cls_source == cls_target:
                     same_classes += 1
                     continue
@@ -154,7 +154,7 @@ class CNNClassifier:
                         MSE.append(noise ** 2)
                         break
         RMSE = np.sqrt(np.sum(MSE) / (len(MSE) - 1))
-        print("RMSE=", RMSE, "\tadv_accuracy=", adv_accuracy / (N - same_classes), '\t\t\t\tstep size=', step_size,
+        print("RMSE=", RMSE, "\tadv_accuracy=", adv_accuracy / (N - same_classes/epochs), '\t\t\t\tstep size=', step_size,
               "\tsource-target=%s\t" % source_target, '\tfast_sign=%s' % fast_sign)
 
     def generate_adversarial_examples(self, cls_target=3, noise_limit=.2, step_size=(1.0 / 255.0), max_iterations=200,
