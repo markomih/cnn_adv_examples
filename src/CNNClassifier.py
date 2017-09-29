@@ -135,7 +135,7 @@ class CNNClassifier:
                 predictions = self.sess.run(self.graph.probs, feed_dict={
                     self.graph.images_placeholder: noisy_image,
                     self.graph.keep_prob: 1.0}).reshape(-1)
-                cls_source = np.argmax(predictions)
+
                 # if predictions[cls_target] > .7 if source_target else predictions[cls_source] > .4:
                 if np.argmax(predictions) != cls_target if source_target else np.argmax(predictions) == cls_source:
                     feed_dict = {self.graph.images_placeholder: noisy_image,
@@ -150,10 +150,10 @@ class CNNClassifier:
                     # self.plot(img, noise, noisy_image, cls_source, cls_target, predictions)
                     break
 
-        N = 100
+        # N = 1000
         skip_data, MSE = 0, []
         adv_accuracy = 0
-        for img, cls_source in zip(self.dataset.data.test.images[:N], self.dataset.data.test.labels[:N]):
+        for img, cls_source in zip(self.dataset.data.test.images, self.dataset.data.test.labels):
             # if source_target and cls_source == cls_target:
             #     same_classes += 1
             #     continue
@@ -175,7 +175,7 @@ class CNNClassifier:
             if cls_predicted == cls_target if source_target else cls_predicted != cls_source:
                 adv_accuracy += 1
 
-        print('adv_accuracy = ', adv_accuracy / (N - skip_data), '\tRMS = ',
+        print('adv_accuracy = ', adv_accuracy / (10000 - skip_data), '\tRMS = ',
               np.sqrt(np.sum(noise ** 2) / self.dataset.image_pixels))
 
     def generate_general_adversarial_examples(self, cls_target=3, noise_limit=.3, step_size=(350.0 / 255.0), source_target=False,
@@ -193,7 +193,6 @@ class CNNClassifier:
                 predictions = self.sess.run(self.graph.probs, feed_dict={
                     self.graph.images_placeholder: noisy_image,
                     self.graph.keep_prob: 1.0}).reshape(-1)
-                cls_source = np.argmax(predictions)
                 # if predictions[cls_target] > .7 if source_target else predictions[cls_source] > .4:
                 if np.argmax(predictions) != cls_target if source_target else np.argmax(predictions) == cls_source:
                     feed_dict = {self.graph.images_placeholder: noisy_image,
