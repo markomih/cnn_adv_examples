@@ -177,7 +177,7 @@ class CNNClassifier:
 
         log_str = '%s\t\t%s\t\t%s\t\t%s\t\t%s\n\n' % \
                   (adv_accuracy / (N - skip_data), np.sqrt(np.sum(noise ** 2) / self.dataset.image_pixels), noise_limit, step_size, epochs)
-
+        print(log_str)
         with open('log.txt', 'a') as f:
             f.write(log_str)
         # print('adv_accuracy = ', adv_accuracy / (N - skip_data), '\tRMS = ', np.sqrt(np.sum(noise ** 2) / self.dataset.image_pixels))

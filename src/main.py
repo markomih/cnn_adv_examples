@@ -32,4 +32,4 @@ step_sizes = [.25/255., .5/255., .75/255., 1.0/255., 1.25]
 
 for noise_limit in noise_limits:
     for step_size in step_sizes:
-        cnn.generate_class_adversarial_examples(step_size=step_size, epochs=3, noise_limit=noise_limit, fast_sign=False, cls_target=False)
+        cnn.generate_class_adversarial_examples(step_size=step_size, epochs=30, noise_limit=noise_limit, fast_sign=False, cls_target=False)
