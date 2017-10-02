@@ -101,7 +101,7 @@ ENV/
 .mypy_cache/
 
 *.idea
-/src/tmp/*
 /src/tmp_final/*
 /src/tmp_full/*
 /src/log/*
+/src/plotting.py

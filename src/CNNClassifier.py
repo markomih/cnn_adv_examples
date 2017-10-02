@@ -18,8 +18,8 @@ class MNISTLoader:
 class CNNClassifier:
     sess = None
 
-    def __init__(self, learning_rate=0.01, max_steps=20000, batch_size=1, log_dir='log', dropout_prob=0.5,
-                 restore_model_path=r'\tmp_final\model.ckpt', dataset=MNISTLoader()):
+    def __init__(self, learning_rate=0.01, max_steps=20000, batch_size=50, log_dir='log', dropout_prob=0.5,
+                 restore_model_path=r'\tmp\model.ckpt', dataset=MNISTLoader()):
         """"
         Args: 
             learning_rate: Initial learning rate.
@@ -31,7 +31,7 @@ class CNNClassifier:
             dataset: Data provider.
         """
 
-        self.learning_rate = learning_rate
+        self.learning_rate = learning_rate  # not used
         self.max_steps = max_steps
         self.batch_size = batch_size
         self.log_dir = log_dir
@@ -42,6 +42,10 @@ class CNNClassifier:
         self.graph = self.ComputationalGraph()
 
     def restore_model(self, print_accuracy=False):
+        restore = os.path.exists(self.restore_model_path + '.meta')
+        if restore:
+            self.batch_size = 1
+
         # region init layers and session
         self.graph.images_placeholder, self.graph.labels_placeholder = self.placeholder_inputs()
         self.inference(self.graph.images_placeholder)
@@ -50,7 +54,6 @@ class CNNClassifier:
         eval_correct = self.evaluation(self.graph.probs, self.graph.labels_placeholder)
 
         self.graph.adv_class_placeholder = tf.placeholder(dtype=tf.int32, name='adv_class_placeholder')
-        # adv_loss = self.loss(logits, [self.graph.adv_class_placeholder])  # maybe [adv..]
         self.graph.adv_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.graph.probs,
                                                                              labels=[self.graph.adv_class_placeholder],
                                                                              name='loss_adv')
@@ -66,7 +69,7 @@ class CNNClassifier:
         # endregion
 
         # region restore model
-        if os.path.exists(self.restore_model_path + '.meta'):
+        if restore:
             saver.restore(self.sess, self.restore_model_path)
             if print_accuracy:
                 print('Test Data Eval:')
@@ -99,8 +102,8 @@ class CNNClassifier:
                 self.do_eval(eval_correct, self.dataset.data.test, 1.0)
         save_path = saver.save(self.sess, self.restore_model_path)
         print('Model saved in file: %s' % save_path)
+        self.restore_model()
         # endregion
-        self.batch_size = 1
 
     @staticmethod
     def update_noise(noise, noise_limit, step_size, grad, fast_sign, source_target):
@@ -118,26 +121,19 @@ class CNNClassifier:
         noise = np.clip(noise, -noise_limit, noise_limit)
         return noise
 
-    def generate_class_adversarial_examples(self, src_target=5, cls_target=3, noise_limit=.3, step_size=(350.0 / 255.0), source_target=False,
-                                              fast_sign=False, epochs=10):
+    def generate_class_adversarial_examples(self, src_target=5, cls_target=3, noise_limit=.3, step_size=(350.0 / 255.0),
+                                            source_target=False,
+                                            fast_sign=False, epochs=10):
         noise = np.zeros((1, self.dataset.image_pixels))
         for epoch in range(epochs):
             print('epoch %s' % epoch)
-            # num_imgs = 100
             for img, cls_source in zip(self.dataset.data.validation.images, self.dataset.data.validation.labels):
                 # if source_target and cls_source == cls_target: continue
                 if cls_source != src_target: continue
 
                 img = img.reshape(1, self.dataset.image_pixels)
-
                 noisy_image = np.clip(img + noise, 0.0, 1.0)
 
-                predictions = self.sess.run(self.graph.probs, feed_dict={
-                    self.graph.images_placeholder: noisy_image,
-                    self.graph.keep_prob: 1.0}).reshape(-1)
-                # cls_source = np.argmax(predictions)
-                # if predictions[cls_target] > .7 if source_target else predictions[cls_source] > .4:
-                # if np.argmax(predictions) != cls_target if source_target else np.argmax(predictions) == cls_source:
                 feed_dict = {self.graph.images_placeholder: noisy_image,
                              self.graph.adv_class_placeholder: cls_target if source_target else cls_source,
                              self.graph.keep_prob: 1.0}
@@ -146,18 +142,9 @@ class CNNClassifier:
                 pred, grad = pred[0], grad[0]
 
                 noise = self.update_noise(noise, noise_limit, step_size, grad, fast_sign, source_target)
-                # else:
-                    # self.plot(img, noise, noisy_image, cls_source, cls_target, predictions)
-                    # break
 
-        N = 10000
-        skip_data, MSE = 0, []
-        adv_accuracy = 0
+        adv_accuracy, skip_data = 0, 0
         for img, cls_source in zip(self.dataset.data.test.images, self.dataset.data.test.labels):
-            # if source_target and cls_source == cls_target:
-            #     same_classes += 1
-            #     continue
-
             if cls_source != src_target:
                 skip_data += 1
                 continue
@@ -175,30 +162,28 @@ class CNNClassifier:
             if cls_predicted == cls_target if source_target else cls_predicted != cls_source:
                 adv_accuracy += 1
 
-        log_str = '%s\t\t%s\t\t%s\t\t%s\t\t%s\n\n' % \
-                  (adv_accuracy / (N - skip_data), np.sqrt(np.sum(noise ** 2) / self.dataset.image_pixels), noise_limit, step_size, epochs)
+        log_str = '%s\t%s\t%s\t%s\t%s\t%s\n' % \
+                  (adv_accuracy / (len(self.dataset.data.test.images) - skip_data),
+                   np.sqrt(np.sum(noise ** 2) / self.dataset.image_pixels),
+                   noise_limit, step_size, epochs, src_target)
         print(log_str)
-        with open('log.txt', 'a') as f:
-            f.write(log_str)
-        # print('adv_accuracy = ', adv_accuracy / (N - skip_data), '\tRMS = ', np.sqrt(np.sum(noise ** 2) / self.dataset.image_pixels))
 
-    def generate_general_adversarial_examples(self, cls_target=3, noise_limit=.3, step_size=(350.0 / 255.0), source_target=False,
+    def generate_general_adversarial_examples(self, cls_target=3, noise_limit=.3, step_size=(350.0 / 255.0),
+                                              source_target=False,
                                               fast_sign=False, epochs=10):
         noise = np.zeros((1, self.dataset.image_pixels))
         for epoch in range(epochs):
             print('epoch %s' % epoch)
-            # num_imgs = 100
             for img, cls_source in zip(self.dataset.data.validation.images, self.dataset.data.validation.labels):
                 if source_target and cls_source == cls_target: continue
-                img = img.reshape(1, self.dataset.image_pixels)
 
+                img = img.reshape(1, self.dataset.image_pixels)
                 noisy_image = np.clip(img + noise, 0.0, 1.0)
 
                 predictions = self.sess.run(self.graph.probs, feed_dict={
                     self.graph.images_placeholder: noisy_image,
                     self.graph.keep_prob: 1.0}).reshape(-1)
                 cls_source = np.argmax(predictions)
-                # if predictions[cls_target] > .7 if source_target else predictions[cls_source] > .4:
                 if np.argmax(predictions) != cls_target if source_target else np.argmax(predictions) == cls_source:
                     feed_dict = {self.graph.images_placeholder: noisy_image,
                                  self.graph.adv_class_placeholder: cls_target if source_target else cls_source,
@@ -212,12 +197,10 @@ class CNNClassifier:
                     # self.plot(img, noise, noisy_image, cls_source, cls_target, predictions)
                     break
 
-        N = 1000
-        same_classes, MSE = 0, []
-        adv_accuracy = 0
-        for img, cls_source in zip(self.dataset.data.test.images[:N], self.dataset.data.test.labels[:N]):
-            if source_target and cls_source == cls_target:
-                same_classes += 1
+        adv_accuracy, skip_data = 0, 0
+        for img, cls_source in zip(self.dataset.data.test.images, self.dataset.data.test.labels):
+            if cls_source == cls_target:
+                skip_data += 1
                 continue
 
             img = img.reshape(1, self.dataset.image_pixels)
@@ -233,16 +216,15 @@ class CNNClassifier:
             if cls_predicted == cls_target if source_target else cls_predicted != cls_source:
                 adv_accuracy += 1
 
-        print('adv_accuracy = ', adv_accuracy / (N - same_classes), '\tRMS = ',
+        print('adv_accuracy = ', adv_accuracy / (len(self.dataset.data.test.images) - skip_data), '\tRMS = ',
               np.sqrt(np.sum(noise ** 2) / self.dataset.image_pixels))
 
     def generate_adversarial_examples(self, cls_target=3, noise_limit=.2, step_size=(1.0 / 255.0), max_iterations=200,
                                       source_target=False, fast_sign=False):
-        adv_accuracy, same_classes, RMS = 0, 0, []
-        N = 1000
-        for img, cls_source in zip(self.dataset.data.test.images[:N], self.dataset.data.test.labels[:N]):
+        adv_accuracy, skip_classes, RMS = 0, 0, []
+        for img, cls_source in zip(self.dataset.data.test.images, self.dataset.data.test.labels):
             if source_target and cls_source == cls_target:
-                same_classes += 1
+                skip_classes += 1
                 continue
 
             img = img.reshape(1, self.dataset.image_pixels)
@@ -266,16 +248,16 @@ class CNNClassifier:
 
                     noise = self.update_noise(noise, noise_limit, step_size, grad, fast_sign, source_target)
                 else:
-                    # self.plot(img, noise, noisy_image, cls_source, cls_target, predictions)
                     adv_accuracy += 1
                     RMS.append(np.sqrt(np.sum(noise ** 2) / self.dataset.image_pixels))
                     break
         mean_RMS = np.mean(RMS)
-        print("RMSE=", mean_RMS, "\tadv_accuracy=", adv_accuracy / (N - same_classes), '\t\t\t\tstep size=', step_size,
+        print("RMSE=", mean_RMS, "\tadv_accuracy=", adv_accuracy / (len(self.dataset.data.test.images) - skip_classes),
+              '\t\t\t\tstep size=', step_size,
               "\tsource-target=%s\t" % source_target, '\tfast_sign=%s' % fast_sign)
 
-        writer = tf.summary.FileWriter(self.log_dir)
-        writer.add_graph(tf.get_default_graph())
+        # writer = tf.summary.FileWriter(self.log_dir)
+        # writer.add_graph(tf.get_default_graph())
 
     def plot(self, img, noise, noisy_image, cls_source, cls_target, predictions):
         mnist_labels = [i for i in range(self.dataset.num_classes)]
