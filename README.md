@@ -32,6 +32,13 @@ We trained our CNN on the training set and evaluated it on the test set. The val
 The network was implemented in Python 3.5, using the tensorflow library. For the cost function we used cross-entropy. We minimized it using the Adam optimizer [5]. The training lasted 20,000 iterations and the weights were updated using a random batch of size 50 in each iteration. After the training, the NN had an accuracy of 99.19% on the test set.
 
 # Adversarial Noise
+In the first hidden layer each neuron computes the dot product between the input x and its weight vector w_ij and then applies an activation function to the product. If we take the input, add a small perturbation and align its signs with the signs of w_ij along each dimension, we get an increase in the value of the dot product which is proportional to the dimensionality of the data. If the dimensionality is big enough, many small changes can add up to one big change. This can make the wrong neurons fire or stop firing, which can result in misclassification. The bigger the dimension of the data, the smaller the perturbation needed to make the model misclassify.
+While generating adversarial examples we used the following iterative algorithm:
+$$x_adv^(i+1)=〖Clip〗_(x,ε) {x_adv^i+α∇_x J(x_adv^i,y_true )}$$
+$$x_adv^0=x$$
+$ \sum_{\forall i}{x_i^{2}} $
 
+$$I = \int \rho R^{2} dV$$
 
+$$A = 5$$
 [1]: literature/%5B1%5D%20Intriguing%20properties%20of%20neural%20networks.pdf
