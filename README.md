@@ -23,4 +23,4 @@ The network was implemented in Python 3.5, using the tensorflow library. For the
 # Adversarial Noise
 
 
-[1]: https://github.com/Maki94/cnn_adv_examples/blob/master/literature/%5B1%5D%20Intriguing%20properties%20of%20neural%20networks.pdf
+[1]: literature/%5B1%5D%20Intriguing%20properties%20of%20neural%20networks.pdf
