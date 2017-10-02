@@ -41,4 +41,6 @@ $ \sum_{\forall i}{x_i^{2}} $
 $$I = \int \rho R^{2} dV$$
 
 $$A = 5$$
+
+
 [1]: literature/%5B1%5D%20Intriguing%20properties%20of%20neural%20networks.pdf
